@@ -1,15 +1,128 @@
 #include <iostream>
 #include <vector>
-#include <fstream>
-#include <string>
 #include <algorithm>
+#include <fstream>
 #include <chrono>
 
 using namespace std;
+using namespace std::chrono;
 
-// Função para ler o grafo a partir do arquivo de entrada
+// Function prototypes
+void findMaximumClique(const vector<vector<int>> &graph, vector<int> &currentClique, vector<int> &maxClique, vector<int> &candidates);
+vector<vector<int>> LerGrafo(const string& nomeArquivo, int& numVertices);
+
+int main(int argc, char* argv[]) {
+    if (argc < 2) {
+        cerr << "Uso: " << argv[0] << " <nome_do_arquivo>" << endl;
+        return 1;
+    }
+
+    string nomeArquivo = argv[1]; // Recebe o nome do arquivo da linha de comando
+    int numVertices;
+
+    // Lê o grafo a partir do arquivo fornecido
+    vector<vector<int>> graph = LerGrafo(nomeArquivo, numVertices);
+
+    // Calcula o grau de cada vértice
+    vector<pair<int, int>> degreeVertexPairs; // Pair of (degree, vertex)
+    for (int i = 0; i < numVertices; ++i) {
+        int degree = 0;
+        for (int j = 0; j < numVertices; ++j) {
+            degree += graph[i][j];
+        }
+        degreeVertexPairs.push_back({degree, i});
+    }
+
+    // Ordena os vértices por grau decrescente
+    sort(degreeVertexPairs.rbegin(), degreeVertexPairs.rend());
+
+    // Prepara a lista de candidatos
+    vector<int> candidates;
+    for (const auto &pair : degreeVertexPairs) {
+        candidates.push_back(pair.second);
+    }
+
+    vector<int> currentClique;
+    vector<int> maxClique;
+
+    // Inicia a contagem de tempo
+    auto start_time = high_resolution_clock::now();
+
+    findMaximumClique(graph, currentClique, maxClique, candidates);
+
+    // Finaliza a contagem de tempo
+    auto end_time = high_resolution_clock::now();
+    auto duration = duration_cast<std::chrono::duration<double>>(end_time - start_time);
+
+    // Exibe o tamanho da clique máxima e os vértices
+    cout << "Maximum Clique Size: " << maxClique.size() << endl;
+    cout << "Vertices in the Maximum Clique: ";
+    for (int vertex : maxClique) {
+        cout << vertex + 1 << " "; // Ajusta o índice para ser 1-based
+    }
+    cout << endl;
+
+    // Exibe o tempo gasto
+    cout << "Time taken to find the maximum clique: " << duration.count() << " seconds" << endl;
+
+    return 0;
+}
+
+void findMaximumClique(const vector<vector<int>> &graph, vector<int> &currentClique, vector<int> &maxClique, vector<int> &candidates) {
+    if (candidates.empty()) {
+        if (currentClique.size() > maxClique.size()) {
+            maxClique = currentClique;
+        }
+        return;
+    }
+
+    while (!candidates.empty()) {
+        int v = candidates.back();
+        candidates.pop_back();
+
+        // Prune the search space if it's impossible to find a larger clique
+        if (currentClique.size() + candidates.size() + 1 <= maxClique.size()) {
+            return;
+        }
+
+        bool canAdd = true;
+        for (int u : currentClique) {
+            if (graph[u][v] == 0) {
+                canAdd = false;
+                break;
+            }
+        }
+
+        if (canAdd) {
+            currentClique.push_back(v);
+
+            vector<int> newCandidates;
+            for (int u : candidates) {
+                bool adjacentToAll = true;
+                for (int c : currentClique) {
+                    if (graph[u][c] == 0) {
+                        adjacentToAll = false;
+                        break;
+                    }
+                }
+                if (adjacentToAll) {
+                    newCandidates.push_back(u);
+                }
+            }
+
+            findMaximumClique(graph, currentClique, maxClique, newCandidates);
+
+            currentClique.pop_back();
+        }
+    }
+}
+
 vector<vector<int>> LerGrafo(const string& nomeArquivo, int& numVertices) {
     ifstream arquivo(nomeArquivo);
+    if (!arquivo.is_open()) {
+        throw runtime_error("Erro ao abrir o arquivo: " + nomeArquivo);
+    }
+
     int numArestas;
     arquivo >> numVertices >> numArestas;
 
@@ -19,92 +132,10 @@ vector<vector<int>> LerGrafo(const string& nomeArquivo, int& numVertices) {
         int u, v;
         arquivo >> u >> v;
         grafo[u - 1][v - 1] = 1;
-        grafo[v - 1][u - 1] = 1;  // O grafo é não direcionado
+        grafo[v - 1][u - 1] = 1; 
     }
 
     arquivo.close();
 
     return grafo;
 }
-
-// Função para verificar se um conjunto de vértices forma uma clique
-bool isClique(const vector<int>& vertices, const vector<vector<int>>& grafo) {
-    for (size_t i = 0; i < vertices.size(); ++i) {
-        for (size_t j = i + 1; j < vertices.size(); ++j) {
-            if (grafo[vertices[i]][vertices[j]] == 0) {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
-// Função para encontrar a maior clique no grafo
-vector<int> encontrarCliqueMaxima(const vector<vector<int>>& grafo, int numVertices) {
-    int maxSize = 0;
-    vector<int> cliqueMaxima;
-
-    for (int subset = 1; subset < (1 << numVertices); ++subset) {
-        vector<int> clique;
-        for (int i = 0; i < numVertices; ++i) {
-            if (subset & (1 << i)) {
-                clique.push_back(i);
-            }
-        }
-
-        if (isClique(clique, grafo) && clique.size() > maxSize) {
-            maxSize = clique.size();
-            cliqueMaxima = clique;
-        }
-    }
-
-    return cliqueMaxima;
-}
-
-int main(int argc, char* argv[]) {
-    // Recebe arquivo via terminal
-    if (argc < 2) {
-        cerr << "Uso: " << argv[0] << " <nome_do_arquivo>" << endl;
-        return 1;
-    }
-
-    // Nome do Arquivo
-    string nomeArquivo = argv[1];
-    // Número de Vértices do grafo
-    int numVertices;
-
-    try {
-        vector<vector<int>> grafo = LerGrafo(nomeArquivo, numVertices);
-
-        // Inicia o cronômetro
-        auto inicio = chrono::high_resolution_clock::now();
-
-        // Encontra a clique máxima no grafo
-        vector<int> cliqueMaxima = encontrarCliqueMaxima(grafo, numVertices);
-
-        // Para o cronômetro
-        auto fim = chrono::high_resolution_clock::now();
-        chrono::duration<double> duracao = fim - inicio;
-
-        // Exibe o resultado no formato solicitado
-        cout << "Clique máxima encontrada: [";
-        for (size_t i = 0; i < cliqueMaxima.size(); ++i) {
-            cout << "'" << (cliqueMaxima[i] + 1) << "'";
-            if (i != cliqueMaxima.size() - 1) {
-                cout << ", ";
-            }
-        }
-        cout << "]" << endl;
-
-        // Exibe o tempo de execução
-        cout << "Tempo de execução: " << duracao.count() << " segundos" << endl;
-
-    } catch (const exception& e) {
-        cerr << "Erro: " << e.what() << endl;
-        return 1;
-    }
-
-    return 0;
-}
-
-
