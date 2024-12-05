@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=sequencial
-#SBATCH --output=sequencial.txt
+#SBATCH --output=outputs/sequencial_150_vertices.txt
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=1024
-#SBATCH --time=00:05:00
+#SBATCH --time=00:15:00
 #SBATCH --partition=normal
 
-mpirun ./sequential grafo_200_vertices.txt
+mpirun ./sequential ../grafos/grafo_150_vertices.txt

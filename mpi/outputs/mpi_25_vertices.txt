@@ -1,0 +1,3 @@
+Maximum Clique Size: 9
+Vertices in the Maximum Clique: 23 24 19 3 5 11 21 8 10 
+Time taken: 7.8323e-05 seconds

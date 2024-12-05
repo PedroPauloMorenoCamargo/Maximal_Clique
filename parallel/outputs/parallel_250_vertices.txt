@@ -1,0 +1,3 @@
+Tamanho da Clique encontrada pela heurística gulosa: 15
+Vértices na Clique: 92 22 12 118 178 248 238 88 200 116 217 162 58 63 239 
+Tempo gasto para encontrar a clique: 1.2458e-05 segundos
