@@ -3,27 +3,32 @@
 #include <algorithm>
 #include <fstream>
 #include <chrono>
+#include <random>
+#include <omp.h>
 
 using namespace std;
 using namespace std::chrono;
 
-// Function prototypes
 vector<vector<int>> LerGrafo(const string& nomeArquivo, int& numVertices);
+vector<int> ConstrucaoClique(const vector<vector<int>>& graph, const vector<int>& candidates);
 
 int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        cerr << "Uso: " << argv[0] << " <nome_do_arquivo>" << endl;
+    if (argc < 3) {
+        cerr << "Uso: " << argv[0] << " <nome_do_arquivo> <numero_de_iteracoes>" << endl;
         return 1;
     }
 
-    string nomeArquivo = argv[1]; // Recebe o nome do arquivo da linha de comando
+    // Recebe o nome do arquivo da linha de comando
+    string nomeArquivo = argv[1]; 
+    // Número de iterações para a busca local
+    int numIteracoes = stoi(argv[2]); 
+    
     int numVertices;
-
     // Lê o grafo a partir do arquivo fornecido
     vector<vector<int>> graph = LerGrafo(nomeArquivo, numVertices);
 
     // Calcula o grau de cada vértice
-    vector<pair<int, int>> degreeVertexPairs; // Pair of (degree, vertex)
+    vector<pair<int, int>> degreeVertexPairs;
     for (int i = 0; i < numVertices; ++i) {
         int degree = 0;
         for (int j = 0; j < numVertices; ++j) {
@@ -35,7 +40,7 @@ int main(int argc, char* argv[]) {
     // Ordena os vértices por grau decrescente
     sort(degreeVertexPairs.rbegin(), degreeVertexPairs.rend());
 
-    // Prepara a lista de candidatos
+    // Prepara a lista de candidatos inicial
     vector<int> candidates;
     for (const auto &pair : degreeVertexPairs) {
         candidates.push_back(pair.second);
@@ -44,18 +49,59 @@ int main(int argc, char* argv[]) {
     // Inicia a contagem de tempo
     auto start_time = high_resolution_clock::now();
 
-    // Implementa a heurística gulosa para encontrar uma clique
-    vector<int> clique;
-    for (int v : candidates) {
-        bool canAdd = true;
-        for (int u : clique) {
-            if (graph[u][v] == 0) {
-                canAdd = false;
-                break;
-            }
+    // Constrói a clique usando a ordem inicial (primeira iteração)
+    vector<int> bestClique = ConstrucaoClique(graph, candidates);
+
+    // Preparação para o paralelismo
+    // Vamos criar um gerador de números aleatórios por thread
+    int nThreads;
+    #pragma omp parallel
+    {
+        #pragma omp single
+        nThreads = omp_get_num_threads();
+    }
+
+    vector<mt19937> gens(nThreads);
+    {
+        // Seed global para cada thread
+        random_device rd;
+        for (int i = 0; i < nThreads; i++) {
+            gens[i].seed(rd());
         }
-        if (canAdd) {
-            clique.push_back(v);
+    }
+
+    // Execução das iterações de hill climbing em paralelo
+    #pragma omp parallel
+    {
+        int tid = omp_get_thread_num();
+        mt19937 &gen = gens[tid];
+        uniform_int_distribution<> dist(0, (int)candidates.size()-1);
+
+        #pragma omp for
+        for (int it = 0; it < numIteracoes; ++it) {
+            // Cria uma cópia do vetor de candidatos para perturbar
+            vector<int> perturbedCandidates = candidates;
+            if (it !=0){
+                // Perturbação simples: troca a posição de dois vértices aleatórios
+                int idx1 = dist(gen);
+                int idx2 = dist(gen);
+                while (idx2 == idx1) {
+                    idx2 = dist(gen);
+                }
+                swap(perturbedCandidates[idx1], perturbedCandidates[idx2]);
+            }
+
+            // Constrói a clique com a nova ordenação
+            vector<int> newClique = ConstrucaoClique(graph, perturbedCandidates);
+
+            // Se melhorou, atualiza a melhor solução (região crítica)
+            #pragma omp critical
+            {
+                if ((int)newClique.size() > (int)bestClique.size()) {
+                    bestClique = newClique;
+                    candidates = perturbedCandidates;
+                }
+            }
         }
     }
 
@@ -63,15 +109,15 @@ int main(int argc, char* argv[]) {
     auto end_time = high_resolution_clock::now();
     auto duration = duration_cast<std::chrono::duration<double>>(end_time - start_time);
 
-    // Exibe o tamanho da clique encontrada e os vértices
-    cout << "Tamanho da Clique encontrada pela heurística gulosa: " << clique.size() << endl;
+    // Exibe o tamanho da melhor clique encontrada e os vértices
+    cout << "Tamanho da melhor clique encontrada: " << bestClique.size() << endl;
     cout << "Vértices na Clique: ";
-    for (int vertex : clique) {
-        cout << vertex + 1 << " "; // Ajusta o índice para ser 1-based
+    for (int vertex : bestClique) {
+        cout << vertex + 1 << " ";
     }
     cout << endl;
 
-    // Exibe o tempo gasto
+
     cout << "Tempo gasto para encontrar a clique: " << duration.count() << " segundos" << endl;
 
     return 0;
@@ -98,4 +144,21 @@ vector<vector<int>> LerGrafo(const string& nomeArquivo, int& numVertices) {
     arquivo.close();
 
     return grafo;
+}
+
+vector<int> ConstrucaoClique(const vector<vector<int>>& graph, const vector<int>& candidates) {
+    vector<int> clique;
+    for (int v : candidates) {
+        bool canAdd = true;
+        for (int u : clique) {
+            if (graph[u][v] == 0) {
+                canAdd = false;
+                break;
+            }
+        }
+        if (canAdd) {
+            clique.push_back(v);
+        }
+    }
+    return clique;
 }

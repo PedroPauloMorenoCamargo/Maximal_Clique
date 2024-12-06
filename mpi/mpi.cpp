@@ -7,74 +7,21 @@
 #include <mpi.h>
 #include <cstdint>
 
-// Uncomment to enable debugging messages
-//#define DEBUG_OUTPUT
-
 using namespace std;
 using namespace std::chrono;
 
-// We'll represent adjacency using bitsets. 
-// Each row of the graph is a vector<uint64_t> where each bit corresponds to an edge.
-// For numVertices, we need (numVertices+63)/64 64-bit blocks.
+/*  
+A matriz de adjacência será representada usando um bitgraph. 
+Cada linha do grafo é um vector<uint64_t>, onde cada bit corresponde a uma aresta entre dois vértices.
+O número de blocos de 64 bits necessários é dado por (numVertices + 63) / 64.
+*/
 
-static inline bool isAdjacent(const vector<uint64_t> &row, int v) {
-    return (row[v >> 6] & (1ULL << (v & 63))) != 0ULL;
-}
 
-// Intersect candidate sets by checking adjacency to a particular vertex v
-// Using a bitset intersection can be done if we keep track of candidate sets as bitsets.
-static inline void filterCandidates(const vector<vector<uint64_t>> &bitGraph,
-                                    const vector<uint64_t> &currentMask,
-                                    const vector<int> &candidates,
-                                    vector<int> &newCandidates,
-                                    int numBlocks) {
-    newCandidates.clear();
-    newCandidates.reserve(candidates.size());
-    
-    // For each candidate, check if it's adjacent to all in currentClique.
-    // Instead of checking individually, we know currentMask is a mask of allowed vertices.
-    // If we keep a mask of allowed vertices, we can just check if candidate is in that mask.
-    // However, since we prune candidates directly, we can just check adjacency to all 
-    // in the current clique. But to optimize further, we store a mask representing
-    // intersection of adjacency of all vertices in currentClique.
-    // For simplicity, we'll do the old-fashioned check here, but using bitsets.
-    
-    // currentMask is a combined mask of valid vertices. candidates are chosen from those vertices.
-    for (int u : candidates) {
-        // Check if u is in currentMask
-        if ((currentMask[u >> 6] & (1ULL << (u & 63))) != 0ULL) {
-            newCandidates.push_back(u);
-        }
-    }
-}
 
-// Builds a mask representing the intersection of adjacency among all vertices in currentClique.
-// This mask will be used to quickly filter candidates.
-static inline void buildIntersectionMask(const vector<vector<uint64_t>> &bitGraph,
-                                         const vector<int> &currentClique,
-                                         vector<uint64_t> &mask) {
-    if (currentClique.empty()) {
-        return;
-    }
-    // Start with the adjacency of the first vertex
-    mask = bitGraph[currentClique[0]];
-    // Intersect with others
-    for (size_t i = 1; i < currentClique.size(); i++) {
-        const vector<uint64_t> &row = bitGraph[currentClique[i]];
-        for (size_t b = 0; b < mask.size(); b++) {
-            mask[b] &= row[b];
-        }
-    }
-}
-
-// Recursive maximum clique search
-// We'll pass a global reference to the best clique size to allow more aggressive pruning.
-void findMaximumClique(const vector<vector<uint64_t>> &bitGraph,
-                       vector<int> &currentClique,
-                       vector<int> &maxClique,
-                       const vector<int> &candidates,
+void findMaximumClique(const vector<vector<uint64_t>> &bitGraph, vector<int> &currentClique, vector<int> &maxClique, const vector<int> &candidates,
                        vector<uint64_t> &intersectionMask,
                        int &globalBest) {
+    // Se não houver mais candidatos, a clique atual é a maior encontrada
     if (candidates.empty()) {
         int size = (int)currentClique.size();
         if (size > globalBest) {
@@ -84,44 +31,44 @@ void findMaximumClique(const vector<vector<uint64_t>> &bitGraph,
         return;
     }
 
-    // Pruning: If even taking all candidates can't beat globalBest, stop.
+    // Podagem: Se o tamanho da clique atual mais o número de candidatos restantes não puder exceder o tamanho da maior clique global, retorna
     if ((int)currentClique.size() + (int)candidates.size() <= globalBest) {
         return;
     }
 
-    // We'll pick candidates in reverse order to mimic original behavior
+    // Itera sobre os candidatos em ordem reversa
     for (int i = (int)candidates.size() - 1; i >= 0; i--) {
+        // Vértice atual
         int v = candidates[i];
-        // Prune check again (as we remove candidates)
+        // Segunda podagem: Se o tamanho da clique atual mais o número de candidatos restantes não puder exceder o tamanho da maior clique global, retorna
         if ((int)currentClique.size() + i + 1 <= globalBest) {
             return;
         }
 
-        // Check adjacency to all in currentClique is trivial now because we used intersectionMask
-        // We know candidates are already filtered. No need to check adjacency again.
         currentClique.push_back(v);
 
-        // Build intersection mask for new clique
+        // Constrói nova máscara de interseção
         vector<uint64_t> newMask = intersectionMask;
         { 
-            // Intersect with adjacency of v
+            // Intersecção da máscara com a linha do bitgraph correspondente ao vértice v
             const vector<uint64_t> &vRow = bitGraph[v];
             for (size_t b = 0; b < newMask.size(); b++) {
                 newMask[b] &= vRow[b];
             }
         }
 
-        // Filter candidates with newMask
+        // Filtra os candidatos
         vector<int> newCandidates;
         newCandidates.reserve(candidates.size());
         for (int j = i - 1; j >= 0; j--) {
             int u = candidates[j];
+            // Verifica se u está na nova máscara
             if ((newMask[u >> 6] & (1ULL << (u & 63))) != 0ULL) {
                 newCandidates.push_back(u);
             }
         }
 
-        // Recursive call
+        // Chama recursivamente a função
         findMaximumClique(bitGraph, currentClique, maxClique, newCandidates, newMask, globalBest);
 
         // Backtrack
@@ -150,17 +97,20 @@ vector<vector<int>> LerGrafo(const string& nomeArquivo, int& numVertices) {
     return grafo;
 }
 
-// Convert adjacency matrix to a bitset representation
-// Each row: vector<uint64_t>, where the j-th bit indicates if there's an edge.
+// Constrói o bitgraph a partir da matriz de adjacência
 static vector<vector<uint64_t>> buildBitGraph(const vector<vector<int>> &graph) {
+    // Número de vértices
     int n = (int)graph.size();
+    // Número de blocos de 64 bits necessários
     int numBlocks = (n + 63) / 64;
-
+    // Inicializa o bitgraph
     vector<vector<uint64_t>> bitGraph(n, vector<uint64_t>(numBlocks, 0ULL));
 
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
+            // Se houver uma aresta entre os vértices i e j, seta o bit correspondente
             if (graph[i][j]) {
+                // Atribui 1 ao bit (j % 64) do bloco (j / 64) da linha i
                 bitGraph[i][j >> 6] |= (1ULL << (j & 63));
             }
         }
@@ -179,7 +129,7 @@ int main(int argc, char* argv[]) {
     int numVertices = 0;
     vector<vector<int>> graph;
 
-    // Only the master reads the input file
+    // Se o rank for 0, lê o grafo do arquivo
     if (rank == 0) {
         if (argc < 2) {
             cerr << "Usage: " << argv[0] << " <input_file>" << endl;
@@ -190,15 +140,15 @@ int main(int argc, char* argv[]) {
         graph = LerGrafo(nomeArquivo, numVertices);
     }
 
-    // Broadcast numVertices to all processes
+    // Broadcast do número de vértices
     MPI_Bcast(&numVertices, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
+    // Se o número de vértices for 0, encerra o programa
     if (numVertices == 0) {
         MPI_Finalize();
         return 0;
     }
 
-    // Flatten the graph and broadcast
+    // Transfere a matriz de adjacência para um vetor para broadcast
     vector<int> flatGraph;
     if (rank == 0) {
         flatGraph.reserve(numVertices * numVertices);
@@ -210,9 +160,9 @@ int main(int argc, char* argv[]) {
     } else {
         flatGraph.resize(numVertices * numVertices);
     }
-
+    // Broadcast da matriz de adjacência
     MPI_Bcast(flatGraph.data(), numVertices * numVertices, MPI_INT, 0, MPI_COMM_WORLD);
-
+    // Reconstrói a matriz de adjacência para os processos diferentes de 0
     if (rank != 0) {
         graph.assign(numVertices, vector<int>(numVertices, 0));
         for (int i = 0; i < numVertices; i++) {
@@ -222,11 +172,11 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Build bitGraph
+    // Constrói o bitgraph a partir da matriz de adjacência
     vector<vector<uint64_t>> bitGraph = buildBitGraph(graph);
     int numBlocks = (numVertices + 63) / 64;
 
-    // The master computes the degrees and prepares candidates
+    // O mestre (rank 0) ordena os vértices por grau decrescente
     vector<int> candidates;
     if (rank == 0) {
         candidates.reserve(numVertices);
@@ -246,20 +196,25 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Distribute candidates among processes
+    // Distribui os candidatos entre os processos
     int totalCandidates = 0;
     if (rank == 0) {
         totalCandidates = (int)candidates.size();
     }
+    // Broadcast do total de candidatos
     MPI_Bcast(&totalCandidates, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
+    // Divide os candidatos entre os processos
     int baseCount = totalCandidates / size;
+    // Resto da divisão
     int remainder = totalCandidates % size;
+    // Número de candidatos do processo atual
     int myCount = baseCount + (rank < remainder ? 1 : 0);
-
+    // Deslocamento dos candidatos do processo atual  
     vector<int> sendCounts, displs;
     sendCounts.resize(size, 0);
     displs.resize(size, 0);
+    // Calcula os deslocamentos e o número de candidatos de cada processo
     if (rank == 0) {
         for (int r = 0; r < size; r++) {
             sendCounts[r] = baseCount + (r < remainder ? 1 : 0);
@@ -268,8 +223,9 @@ int main(int argc, char* argv[]) {
             displs[r] = displs[r - 1] + sendCounts[r - 1];
         }
     }
-
+    // Distribui os candidatos
     vector<int> myCandidates(myCount, -1);
+    // Envia os candidatos para os processos
     MPI_Scatterv((rank == 0 ? candidates.data() : nullptr),
                  sendCounts.data(),
                  displs.data(),
@@ -283,31 +239,33 @@ int main(int argc, char* argv[]) {
     MPI_Barrier(MPI_COMM_WORLD);
     auto start_time = high_resolution_clock::now();
 
-    // Each process searches for max clique starting from assigned candidates
+    // Cada processo executa a busca localmente
     vector<int> currentClique;
     currentClique.reserve(numVertices);
     vector<int> maxCliqueLocal;
     vector<int> maxCliqueGlobal;
 
-    // Global best clique size for pruning
+    // Inicializa a maior clique global
     int globalBestLocal = 0;
-
+    // Máscara completa com todos os bits inicialmente habilitados (todos os vértices disponíveis).
     vector<uint64_t> fullMask(numBlocks, ~0ULL);
-    // Adjust fullMask because we have exactly numVertices bits
-    // Clear unused bits in the last block if necessary
+    // Bits extras no último bloco
     int extraBits = (numBlocks * 64) - numVertices;
+    // Se houver bits extras, ajusta a máscara
     if (extraBits > 0) {
+        // Máscara para os bits extras
         uint64_t mask = (1ULL << (64 - extraBits)) - 1ULL;
+        // Zera os bits extras
         fullMask[numBlocks - 1] &= mask;
     }
-
+    // Para cada candidato do processo
     for (int c : myCandidates) {
         currentClique.clear();
         currentClique.push_back(c);
 
-        // Build mask for candidates adjacent to c
+        // Cria uma máscara de bits para a relação de adjacência de c com todos os vértices da clique atual
         vector<uint64_t> cMask = bitGraph[c];
-        // Filter the global candidates based on cMask
+        // Filtra os candidatos que são adjacentes a c
         vector<int> filteredCandidates;
         filteredCandidates.reserve(totalCandidates);
         for (int u : candidates) {
@@ -316,33 +274,36 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Run recursive search
+        // Chama a função recursiva
         findMaximumClique(bitGraph, currentClique, maxCliqueLocal, filteredCandidates, cMask, globalBestLocal);
     }
 
     int localMaxSize = (int)maxCliqueLocal.size();
 
     vector<int> allSizes(size, 0);
+    // Coleta o tamanho da maior clique de cada processo
     MPI_Gather(&localMaxSize, 1, MPI_INT, allSizes.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
 
     int maxSizeGlobal = 0;
     int bestRank = 0;
     if (rank == 0) {
         for (int r = 0; r < size; r++) {
+            // Atualiza o tamanho da maior clique global
             if (allSizes[r] > maxSizeGlobal) {
                 maxSizeGlobal = allSizes[r];
                 bestRank = r;
             }
         }
     }
-
+    // Broadcast do rank do processo com a maior clique
     MPI_Bcast(&bestRank, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    // Broadcast do tamanho da maior clique global
     MPI_Bcast(&maxSizeGlobal, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
+    // Se o processo atual tem a maior clique, envia a clique para o processo 0
     if (rank == bestRank) {
         MPI_Send(maxCliqueLocal.data(), maxSizeGlobal, MPI_INT, 0, 0, MPI_COMM_WORLD);
     }
-
+    // O processo 0 recebe a maior clique global
     if (rank == 0) {
         maxCliqueGlobal.resize(maxSizeGlobal);
         MPI_Recv(maxCliqueGlobal.data(), maxSizeGlobal, MPI_INT, bestRank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -350,7 +311,7 @@ int main(int argc, char* argv[]) {
 
     MPI_Barrier(MPI_COMM_WORLD);
     auto end_time = high_resolution_clock::now();
-
+    // O processo 0 exibe o resultado
     if (rank == 0) {
         auto duration = duration_cast<std::chrono::duration<double>>(end_time - start_time);
         cout << "Maximum Clique Size: " << maxCliqueGlobal.size() << endl;
