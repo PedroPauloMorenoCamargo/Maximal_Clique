@@ -1,0 +1,1 @@
+slurmstepd-compute00: error: *** JOB 9942 ON compute00 CANCELLED AT 2024-12-06T13:49:40 DUE TO TIME LIMIT ***
