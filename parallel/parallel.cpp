@@ -81,15 +81,14 @@ int main(int argc, char* argv[]) {
         for (int it = 0; it < numIteracoes; ++it) {
             // Cria uma cópia do vetor de candidatos para perturbar
             vector<int> perturbedCandidates = candidates;
-            if (it !=0){
-                // Perturbação simples: troca a posição de dois vértices aleatórios
-                int idx1 = dist(gen);
-                int idx2 = dist(gen);
-                while (idx2 == idx1) {
-                    idx2 = dist(gen);
-                }
-                swap(perturbedCandidates[idx1], perturbedCandidates[idx2]);
+            
+            // Perturbação simples: troca a posição de dois vértices aleatórios
+            int idx1 = dist(gen);
+            int idx2 = dist(gen);
+            while (idx2 == idx1) {
+                idx2 = dist(gen);
             }
+            swap(perturbedCandidates[idx1], perturbedCandidates[idx2]);
 
             // Constrói a clique com a nova ordenação
             vector<int> newClique = ConstrucaoClique(graph, perturbedCandidates);
